@@ -1,0 +1,16 @@
+{
+  "manifest_version": 2,
+  "name": "Zotero Copy PDF",
+  "version": "1.0.1",
+  "description": "Copy attached PDF files of selected items to the clipboard.",
+  "author": "mwanggh",
+  "homepage_url": "https://github.com/mwanggh/zotero-copy-pdf",
+  "applications": {
+    "zotero": {
+      "id": "copy-pdf@mwanggh",
+      "update_url": "https://raw.githubusercontent.com/mwanggh/zotero-copy-pdf/main/updates.json",
+      "strict_min_version": "7.0",
+      "strict_max_version": "10.*"
+    }
+  }
+}
