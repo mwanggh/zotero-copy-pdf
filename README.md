@@ -16,10 +16,6 @@
 
 ## Requirements
 
-- Windows with Windows PowerShell.
+- This version supports Windows and Wayland (Linux) only.
 - A Zotero version supporting the MenuManager API.
 - PDF attachments downloaded locally.
-
-## Troubleshooting
-
-- This version supports Windows and Wayland (Linux) only.
