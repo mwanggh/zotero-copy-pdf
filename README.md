@@ -1,22 +1,25 @@
 # Zotero Copy PDF
 
-Copy local PDF attachments from Zotero to the Windows clipboard, then paste them into any folder.
+**Zotero Copy PDF** is a lightweight plugin for Zotero that allows you to easily copy local PDF attachments to your system clipboard. Once copied, you can paste the actual PDF files directly into any folder in your local file explorer using `Ctrl+V`.
 
 ![Screenshot](./screenshot.png)
 
+## Features
+- Adds a convenient **"Copy PDF Files"** option to the Zotero context menu.
+- Supports selecting multiple items or individual PDF attachments.
+
 ## Installation
 
-1. Download **zotero-copy-pdf.zip**.
-2. Open **Tools → Plugins** in Zotero.
-3. Drag the ZIP file into the Plugins window and confirm installation.
-4. Restart Zotero.
-
-## Usage
-
-Select items or PDF attachments → right-click → **Copy PDF Files** → press **Ctrl+V** in the destination folder.
+1. Download the project's `.zip` file directly from this repository.
+2. Open Zotero and navigate to **Tools** -> **Plugins** from the top menu bar.
+3. Simply drag and drop the downloaded `.zip` file into the Add-ons window to install it.
 
 ## Requirements
 
 - Windows with Windows PowerShell.
 - A Zotero version supporting the MenuManager API.
 - PDF attachments downloaded locally.
+
+## Troubleshooting
+
+- This version supports Windows and Wayland (Linux) only.

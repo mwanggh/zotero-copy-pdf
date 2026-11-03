@@ -19,7 +19,7 @@ var CopyPDF = {
                 menu: "复制 PDF 文件",
                 copying: "正在复制 PDF 文件…",
 
-                windowsOnly: "此版本仅支持 Windows。",
+                osNotSupported: "此版本仅支持 Windows 和 Wayland (Linux)。",
 
                 noPDF:
                     "没有找到可复制的本地 PDF。\n\n" +
@@ -35,10 +35,16 @@ var CopyPDF = {
                     "可到目标文件夹按 Ctrl+V 粘贴。",
 
                 timeout:
-                    "调用 Windows 剪贴板超时，请稍后重试。",
+                    "调用剪贴板超时，请稍后重试。",
 
                 noPowerShell:
                     "找不到 Windows PowerShell。",
+
+                notWayland:
+                    "当前 Linux 环境不是 Wayland。此插件仅支持 Windows 和 Wayland，不支持 X11。",
+
+                noLinuxClipboard:
+                    "找不到剪贴板工具。\n请在终端执行：sudo apt install wl-clipboard",
 
                 noMenuAPI:
                     "当前 Zotero 未提供所需的 MenuManager API。",
@@ -58,8 +64,8 @@ var CopyPDF = {
                 menu: "Copy PDF Files",
                 copying: "Copying PDF files…",
 
-                windowsOnly:
-                    "This version supports Windows only.",
+                osNotSupported:
+                    "This version supports Windows and Wayland (Linux) only.",
 
                 noPDF:
                     "No local PDF files were found.\n\n" +
@@ -76,10 +82,16 @@ var CopyPDF = {
                     "Press Ctrl+V in the destination folder to paste.",
 
                 timeout:
-                    "The Windows clipboard operation timed out. Please try again.",
+                    "The clipboard operation timed out. Please try again.",
 
                 noPowerShell:
                     "Windows PowerShell was not found.",
+
+                notWayland:
+                    "The current Linux environment is not Wayland. This plugin only supports Windows and Wayland, not X11.",
+
+                noLinuxClipboard:
+                    "Clipboard tool not found.\nPlease run: sudo apt install wl-clipboard",
 
                 noMenuAPI:
                     "The required MenuManager API is unavailable in this version of Zotero.",
@@ -131,7 +143,6 @@ var CopyPDF = {
 
         if (this.menuID !== null) return;
 
-        // 插件包内的本地图标地址，支持安装为 XPI 后使用
         const iconURL = rootURI + "icons/copy-pdf.png";
 
         this.menuID = Zotero.MenuManager.registerMenu({
@@ -142,8 +153,6 @@ var CopyPDF = {
             menus: [
                 {
                     menuType: "menuitem",
-
-                    // 为右键菜单添加本地图标
                     icon: iconURL,
 
                     onShowing: (event, context) => {
@@ -169,7 +178,6 @@ var CopyPDF = {
                             event.target?.ownerGlobal ||
                             Zotero.getMainWindow();
 
-                        // 保存点击菜单这一刻的选择，避免异步过程中选择变化
                         const items = Array.from(context.items || []);
 
                         this.copySelectedPDFs(win, items).catch(error => {
@@ -215,7 +223,6 @@ var CopyPDF = {
     },
 
     async collectPDFs(items) {
-        // 按附件 ID 去重，避免父条目和子附件同时选中时重复处理
         const attachments = new Map();
 
         for (const item of items) {
@@ -241,7 +248,6 @@ var CopyPDF = {
         for (const attachment of attachments.values()) {
             if (!this.active) break;
 
-            // 只复制 Zotero 识别为 PDF 的附件
             if (attachment.attachmentContentType !== "application/pdf") {
                 continue;
             }
@@ -286,8 +292,8 @@ var CopyPDF = {
         this.busy = true;
 
         try {
-            if (!Zotero.isWin) {
-                throw new Error(this.text("windowsOnly"));
+            if (!Zotero.isWin && !Zotero.isLinux) {
+                throw new Error(this.text("osNotSupported"));
             }
 
             const { paths, skipped } = await this.collectPDFs(items);
@@ -298,17 +304,19 @@ var CopyPDF = {
                 throw new Error(this.text("noPDF"));
             }
 
-            await this.copyWindowsFiles(win, paths);
+            if (Zotero.isWin) {
+                await this.copyWindowsFiles(win, paths);
+            } else if (Zotero.isLinux) {
+                await this.copyLinuxFiles(win, paths);
+            }
 
             if (!this.active) return;
 
-            // 成功只写调试日志，不弹出窗口
             this.log(
                 `Clipboard updated: ${paths.length} PDF file(s); ` +
                 `${skipped} attachment(s) skipped.`
             );
 
-            // 仅部分失败时提示，语言统一从 text() 获取
             if (skipped > 0) {
                 this.alert(
                     win,
@@ -334,7 +342,6 @@ var CopyPDF = {
         }
     },
 
-    // PowerShell 的 -EncodedCommand 使用 UTF-16LE Base64
     encodePowerShell(win, script) {
         let binary = "";
 
@@ -356,6 +363,87 @@ var CopyPDF = {
         }
 
         return output;
+    },
+
+    async copyLinuxFiles(win, paths) {
+        const { Subprocess } = ChromeUtils.importESModule(
+            "resource://gre/modules/Subprocess.sys.mjs"
+        );
+        const { setTimeout, clearTimeout } = ChromeUtils.importESModule(
+            "resource://gre/modules/Timer.sys.mjs"
+        );
+
+        const uris = paths.map(p => "file://" + encodeURI(p).replace(/#/g, '%23'));
+        let clipboardData = uris.join("\r\n") + "\r\n";
+
+        let command = null;
+        let args = [];
+
+        const findExecutable = async (cmd) => {
+            try {
+                return await Subprocess.pathSearch(cmd);
+            } catch (e) {
+                return null;
+            }
+        };
+
+        const isWayland = !!Services.env.get("WAYLAND_DISPLAY");
+        
+        if (!isWayland) {
+            throw new Error(this.text("notWayland"));
+        }
+
+        const wlCopyPath = await findExecutable("wl-copy");
+
+        if (wlCopyPath) {
+            command = wlCopyPath;
+            args = ["--type", "text/uri-list"];
+        } else {
+            throw new Error(this.text("noLinuxClipboard"));
+        }
+
+        const proc = await Subprocess.call({
+            command: command,
+            arguments: args,
+            stderr: "stdout"
+        });
+
+        this.process = proc;
+
+        if (!this.active) {
+            proc.kill();
+            this.process = null;
+            throw new Error("Plugin was disabled");
+        }
+
+        try {
+            await proc.stdin.write(clipboardData);
+            await proc.stdin.close();
+
+            const result = await new Promise((resolve) => {
+                const timer = setTimeout(() => {
+                    resolve({ timeout: true });
+                }, 500);
+
+                proc.wait().then(res => {
+                    clearTimeout(timer);
+                    resolve({ timeout: false, exitCode: res.exitCode });
+                });
+            });
+
+            if (!result.timeout && result.exitCode !== 0) {
+                throw new Error(`Clipboard command '${command}' exited with code ${result.exitCode}`);
+            }
+        } catch (error) {
+            try {
+                proc.kill();
+            } catch (_) { }
+            throw error;
+        } finally {
+            if (this.process === proc) {
+                this.process = null;
+            }
+        }
     },
 
     async copyWindowsFiles(win, paths) {
@@ -387,12 +475,6 @@ var CopyPDF = {
             throw new Error(this.text("noPowerShell"));
         }
 
-        /*
-         * 路径通过标准输入中的 JSON 传递，不拼接进 PowerShell 代码。
-         * 这样中文、空格、引号等不会被当作命令执行。
-         *
-         * SetFileDropList 写入真正的文件列表，而不是路径文本。
-         */
         const script = `
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -401,14 +483,12 @@ $ProgressPreference = 'SilentlyContinue'
 try {
     Add-Type -AssemblyName System.Windows.Forms
 
-    # 标准输入只能读取一次
     $json = [Console]::In.ReadToEnd()
 
     if ([string]::IsNullOrWhiteSpace($json)) {
         throw 'No file list was received from Zotero.'
     }
 
-    # 不在外层额外添加 @(...)
     $paths = ConvertFrom-Json -InputObject $json
 
     $files = New-Object System.Collections.Specialized.StringCollection
@@ -465,8 +545,6 @@ catch {
 
         const encoded = this.encodePowerShell(win, script);
 
-        // 转成纯 ASCII JSON，避免 PowerShell 标准输入编码影响中文路径。
-        // JSON 解析后会还原 Unicode 字符。
         const input = JSON.stringify(paths).replace(
             /[\u007f-\uffff]/g,
             char => "\\u" + char.charCodeAt(0).toString(16).padStart(4, "0")
@@ -508,7 +586,6 @@ catch {
         }, 30000);
 
         try {
-            // 同时读输出和写输入，避免管道阻塞
             const outputPromise = this.readAll(proc.stdout);
 
             const inputPromise = (async () => {
@@ -535,9 +612,7 @@ catch {
         } catch (error) {
             try {
                 proc.kill();
-            } catch (_) {
-                // 进程可能已经结束
-            }
+            } catch (_) { }
 
             if (timedOut) {
                 throw new Error(this.text("timeout"));
@@ -578,7 +653,6 @@ async function startup(data, reason) {
         }
     }
 }
-
 
 function shutdown(data, reason) {
     CopyPDF.stop();
